@@ -5,10 +5,9 @@ on:
     branches:
       - main
 
-      
 jobs:
   build_run_test:
-    runs-on: docxtemplate-runners-set
+    runs-on: [docxtemplate-runners-set]
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -52,8 +51,8 @@ jobs:
         docker push ghcr.io/${{ env.REPO }}:latest
 
 
-  Update_helm_chart:
-    runs-on: docxtemplate-runners-set
+  update_helm_chart:
+    runs-on: [docxtemplate-runners-set]
     needs: build_run_test
     steps:   
     - name: Update image version in helm chart
