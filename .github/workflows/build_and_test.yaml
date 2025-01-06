@@ -5,7 +5,6 @@ on:
     branches:
       - main
 
-
 jobs:
   build_run_test:
     runs-on: [docxtemplate-runners-set]
@@ -23,14 +22,6 @@ jobs:
 
     - name: Run Robot Framework tests
       run: |
-        sudo apt update && sudo apt-get install -y python3-pip wget unzip
-        pip install git+https://github.com/robotframework/SeleniumLibrary.git
-        wget --no-verbose -O /tmp/chrome.deb https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_120.0.6099.71-1_amd64.deb
-        sudo apt install -y --allow-downgrades /tmp/chrome.deb
-        rm /tmp/chrome.deb
-        wget https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/119.0.6045.105/linux64/chromedriver-linux64.zip
-        unzip chromedriver-linux64.zip
-        sudo cp chromedriver-linux64/chromedriver /usr/local/bin/
         robot tests/
     - name: Stop and remove container
       if: always()
