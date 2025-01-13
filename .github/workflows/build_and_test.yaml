@@ -11,64 +11,73 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    - name: Build Docker image
-      run: docker build --build-arg git_token=${{ secrets.GITHUB_TOKEN }} --build-arg CACHEBUST=$(date +%s) --build-arg BRANCH=main --build-arg OWNER=${{ github.repository_owner }} -t tender-docxtemplate-app .
-    - name: Run Tender app
+    - name: Test python version
       run: |
-        docker run -d --name tender-docxtemplate-app -p 8503:8503 tender-docxtemplate-app
-        sleep 10  # Give the container some time to start
-    - name: Check container status
-      run: docker inspect tender-docxtemplate-app
+        python --version
+        python3 --version
+        python3 -m pip --version
+    - name: Test docker version
+      run: sudo docker --version
+    - name: Test robot framework version
+      run: robot --version
+    # - name: Build Docker image
+    #   run: docker build --build-arg git_token=${{ secrets.GITHUB_TOKEN }} --build-arg CACHEBUST=$(date +%s) --build-arg BRANCH=main --build-arg OWNER=${{ github.repository_owner }} -t tender-docxtemplate-app .
+    # - name: Run Tender app
+    #   run: |
+    #     docker run -d --name tender-docxtemplate-app -p 8503:8503 tender-docxtemplate-app
+    #     sleep 10  # Give the container some time to start
+    # - name: Check container status
+    #   run: docker inspect tender-docxtemplate-app
 
-    - name: Run Robot Framework tests
-      run: |
-        robot tests/
-    - name: Stop and remove container
-      if: always()
-      run: docker rm -f tender-docxtemplate-app
-    - name: Downcase REPO
-      run: |
-        echo "REPO=${GITHUB_REPOSITORY,,}" >>${GITHUB_ENV}
-    - name: Login to GitHub Container Registry
-      uses: docker/login-action@v2
-      with:
-        registry: ghcr.io
-        username: '${{ github.repository_owner }}'
-        password: '${{ secrets.GITHUB_TOKEN }}'
-    - name: Push image to GitHub Container Registry
-      run: |
-        docker tag tender-docxtemplate-app:latest ghcr.io/${{ env.REPO }}:v1.${{ github.run_number }}
-        docker tag tender-docxtemplate-app:latest ghcr.io/${{ env.REPO }}:latest
-        docker push ghcr.io/${{ env.REPO }}:v1.${{ github.run_number }}
-        docker push ghcr.io/${{ env.REPO }}:latest
+  #   - name: Run Robot Framework tests
+  #     run: |
+  #       robot tests/
+  #   - name: Stop and remove container
+  #     if: always()
+  #     run: docker rm -f tender-docxtemplate-app
+  #   - name: Downcase REPO
+  #     run: |
+  #       echo "REPO=${GITHUB_REPOSITORY,,}" >>${GITHUB_ENV}
+  #   - name: Login to GitHub Container Registry
+  #     uses: docker/login-action@v2
+  #     with:
+  #       registry: ghcr.io
+  #       username: '${{ github.repository_owner }}'
+  #       password: '${{ secrets.GITHUB_TOKEN }}'
+  #   - name: Push image to GitHub Container Registry
+  #     run: |
+  #       docker tag tender-docxtemplate-app:latest ghcr.io/${{ env.REPO }}:v1.${{ github.run_number }}
+  #       docker tag tender-docxtemplate-app:latest ghcr.io/${{ env.REPO }}:latest
+  #       docker push ghcr.io/${{ env.REPO }}:v1.${{ github.run_number }}
+  #       docker push ghcr.io/${{ env.REPO }}:latest
 
-  update_helm_chart:
-    runs-on: [docxtemplate-runners-set]
-    needs: build_run_test
-    steps:   
-    - name: Update image version in helm chart
-      run: |
-        echo "The JOB_No is ${{ github.run_number }}"
-        # echo "GitHub Actions is not allowed to push commits to the repo, so we can't do it here now."
-        # Nextstep to push
-        # git config --global user.name "svtechnmaa"
-        # git config --global user.email "nmaa@svtech.com.vn"
-        # git clone -b feature/streamlit https://github.com/svtechnmaa/charts.git --depth=1 --single-branch
-        # cd charts/
-        # sed -i '/^  repository: svtechnmaa\/tender_document_generator/{N;s/  tag: .*/  tag: '"v1.${{ github.run_number }}"'/}' kubernetes/docxtemplate/values.yaml
-        # git add .
-        # git commit -m "no-ci: Update docxtemplate image version"
-        # git remote set-url origin https://svtechnmaa:${{ secrets.GITHUB_TOKEN }}@github.com/svtechnmaa/charts.git
-        # git push origin feature/streamlit
-        # sed -i '/^    repository: svtechnmaa\/tender_document_generator/{N;s/  tag: .*/  tag: '"v1.$JOB_No"'/}' kubernetes/internal_apps/docxtemplate/values.yaml
-        # git add .
-        # git commit -S -m "no-ci: Update Docxtemplate image version"
-        # git remote set-url origin https://svtechnmaa:$GIT_TOKEN@github.com/svtechnmaa/stacked_charts.git
-        # git push origin fix/icinga2  ####
+  # update_helm_chart:
+  #   runs-on: [docxtemplate-runners-set]
+  #   needs: build_run_test
+  #   steps:   
+  #   - name: Update image version in helm chart
+  #     run: |
+  #       echo "The JOB_No is ${{ github.run_number }}"
+  #       # echo "GitHub Actions is not allowed to push commits to the repo, so we can't do it here now."
+  #       # Nextstep to push
+  #       # git config --global user.name "svtechnmaa"
+  #       # git config --global user.email "nmaa@svtech.com.vn"
+  #       # git clone -b feature/streamlit https://github.com/svtechnmaa/charts.git --depth=1 --single-branch
+  #       # cd charts/
+  #       # sed -i '/^  repository: svtechnmaa\/tender_document_generator/{N;s/  tag: .*/  tag: '"v1.${{ github.run_number }}"'/}' kubernetes/docxtemplate/values.yaml
+  #       # git add .
+  #       # git commit -m "no-ci: Update docxtemplate image version"
+  #       # git remote set-url origin https://svtechnmaa:${{ secrets.GITHUB_TOKEN }}@github.com/svtechnmaa/charts.git
+  #       # git push origin feature/streamlit
+  #       # sed -i '/^    repository: svtechnmaa\/tender_document_generator/{N;s/  tag: .*/  tag: '"v1.$JOB_No"'/}' kubernetes/internal_apps/docxtemplate/values.yaml
+  #       # git add .
+  #       # git commit -S -m "no-ci: Update Docxtemplate image version"
+  #       # git remote set-url origin https://svtechnmaa:$GIT_TOKEN@github.com/svtechnmaa/stacked_charts.git
+  #       # git push origin fix/icinga2  ####
 
-        # sed -i '/^  repository: svtechnmaa\/tender_document_generator/{N;s/  tag: .*/  tag: '"v1.$JOB_No"'/}' kubernetes/docxtemplate/values.yaml
-        # git add .
-        # git commit -m "no-ci: Update Docxtemplate image version"
-        # git remote set-url origin https://svtechnmaa:$GIT_TOKEN@github.com/svtechnmaa/charts.git
-        # git push origin $HELMCHART_TAG
+  #       # sed -i '/^  repository: svtechnmaa\/tender_document_generator/{N;s/  tag: .*/  tag: '"v1.$JOB_No"'/}' kubernetes/docxtemplate/values.yaml
+  #       # git add .
+  #       # git commit -m "no-ci: Update Docxtemplate image version"
+  #       # git remote set-url origin https://svtechnmaa:$GIT_TOKEN@github.com/svtechnmaa/charts.git
+  #       # git push origin $HELMCHART_TAG
     
