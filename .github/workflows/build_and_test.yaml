@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+
 jobs:
   build_run_test:
     runs-on: [docxtemplate2-runners-set]
@@ -24,6 +25,7 @@ jobs:
         sleep 10  # Give the container some time to start
     - name: Check container status
       run: docker inspect tender-docxtemplate-app
+      
   #   - name: Run Robot Framework tests
   #     run: |
   #       robot tests/
