@@ -26,6 +26,7 @@ jobs:
     - name: Check container status
       run: docker inspect tender-docxtemplate-app
 
+      
   #   - name: Run Robot Framework tests
   #     run: |
   #       robot tests/
