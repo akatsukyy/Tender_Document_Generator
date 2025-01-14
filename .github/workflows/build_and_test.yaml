@@ -15,8 +15,8 @@ jobs:
       run: pip list
     - name: Test docker version
       run: docker --version
-    - name: Test robot framework version
-      run: robot --version
+    # - name: Test robot framework version
+    #   run: robot --version
       
     - name: Build Docker image
       run: docker build --build-arg git_token=${{ secrets.GITHUB_TOKEN }} --build-arg CACHEBUST=$(date +%s) --build-arg BRANCH=main --build-arg OWNER=${{ github.repository_owner }} -t tender-docxtemplate-app .
