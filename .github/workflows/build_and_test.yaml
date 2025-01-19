@@ -7,7 +7,7 @@ on:
 
 jobs:
   build_run_test:
-    runs-on: [internal-apps]
+    runs-on: [internal-apps, group=internals-apps]
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
