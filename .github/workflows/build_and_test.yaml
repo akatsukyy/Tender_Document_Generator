@@ -7,7 +7,7 @@ on:
 
 jobs:
   build_run_test:
-    runs-on: [internal-apps, group=internals-apps]
+    runs-on: [internal-apps]
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -50,7 +50,7 @@ jobs:
         docker push ghcr.io/${{ env.REPO }}:latest
 
   update_helm_chart:
-    runs-on: [docxtemplate-runners-set]
+    runs-on: [internal-apps]
     needs: build_run_test
     steps:   
     - name: Update image version in helm chart
