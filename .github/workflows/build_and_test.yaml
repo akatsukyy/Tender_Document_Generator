@@ -7,7 +7,7 @@ on:
 
 jobs:
   build_run_test:
-    runs-on: ansible-dind
+    runs-on: ansible-dind-g2
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -52,7 +52,7 @@ jobs:
 
   update_helm_chart:
     runs-on: 
-      group: ansible-dind
+      group: ansible-dind-g2
     permissions:
       contents: read
       packages: write
