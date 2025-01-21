@@ -11,6 +11,9 @@ on:
 jobs:
   build_run_test:
     runs-on: robot-dind
+    permissions:
+      contents: read
+      packages: write
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -62,6 +65,9 @@ jobs:
 
   update_helm_chart:
     runs-on: robot-dind
+    permissions:
+      contents: read
+      packages: write
     needs: build_run_test
     steps:   
     - name: Update image version in helm chart
