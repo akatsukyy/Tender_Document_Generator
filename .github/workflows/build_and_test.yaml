@@ -15,54 +15,64 @@ jobs:
       contents: read
       packages: write
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
-    - name: Setup Python 3.13
-      uses: actions/setup-python@v5.3.0
-      with:
-        python-version: "3.13"
-    - name: Cache Docker layers
-      uses: actions/cache@v3
-      with:
-        path: /tmp/.buildx-cache
-        key: ${{ runner.os }}-buildx-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-buildx-
+    # - name: Checkout code
+    #   uses: actions/checkout@v4
+    # - name: Set up Docker Buildx
+    #   uses: docker/setup-buildx-action@v2
+    # - name: Setup Python 3.13
+    #   uses: actions/setup-python@v5.3.0
+    #   with:
+    #     python-version: "3.13"
+    # - name: Cache Docker layers
+    #   uses: actions/cache@v3
+    #   with:
+    #     path: /tmp/.buildx-cache
+    #     key: ${{ runner.os }}-buildx-${{ github.sha }}
+    #     restore-keys: |
+    #       ${{ runner.os }}-buildx-
 
-    - name: Build Docker image
-      run: docker build --build-arg git_token=${{ secrets.GITHUB_TOKEN }} --build-arg CACHEBUST=$(date +%s) --build-arg BRANCH=main --build-arg OWNER=${{ github.repository_owner }} -t tender-docxtemplate-app .
-    - name: Run Tender app
-      run: |
-        docker run -d --name tender-docxtemplate-app -p 8503:8503 tender-docxtemplate-app
-        sleep 10  # Give the container some time to start
-    - name: Check container status
-      run: docker inspect tender-docxtemplate-app
+    # - name: Build Docker image
+    #   run: docker build --build-arg git_token=${{ secrets.GITHUB_TOKEN }} --build-arg CACHEBUST=$(date +%s) --build-arg BRANCH=main --build-arg OWNER=${{ github.repository_owner }} -t tender-docxtemplate-app .
+    # - name: Run Tender app
+    #   run: |
+    #     docker run -d --name tender-docxtemplate-app -p 8503:8503 tender-docxtemplate-app
+    #     sleep 10  # Give the container some time to start
+    # - name: Check container status
+    #   run: docker inspect tender-docxtemplate-app
       
-    - name: Run Robot Framework tests
-      run: |
-        pip install git+https://github.com/robotframework/SeleniumLibrary.git
-        robot tests/
-    - name: Stop and remove container
-      if: always()
-      run: docker rm -f tender-docxtemplate-app
-    - name: Downcase REPO
-      run: |
-        echo "REPO=${GITHUB_REPOSITORY,,}" >>${GITHUB_ENV}
+    # - name: Run Robot Framework tests
+    #   run: |
+    #     pip install git+https://github.com/robotframework/SeleniumLibrary.git
+    #     robot tests/
+    # - name: Stop and remove container
+    #   if: always()
+    #   run: docker rm -f tender-docxtemplate-app
+    # - name: Downcase REPO
+    #   run: |
+    #     echo "REPO=${GITHUB_REPOSITORY,,}" >>${GITHUB_ENV}
 
-    - name: Login to GitHub Container Registry
-      uses: docker/login-action@v2
-      with:
-        registry: ghcr.io
-        username: '${{ github.repository_owner }}'
-        password: '${{ secrets.GITHUB_TOKEN }}'
-    - name: Push image to GitHub Container Registry
+    # - name: Login to GitHub Container Registry
+    #   uses: docker/login-action@v2
+    #   with:
+    #     registry: ghcr.io
+    #     username: '${{ github.repository_owner }}'
+    #     password: '${{ secrets.GITHUB_TOKEN }}'
+    # - name: Push image to GitHub Container Registry
+    #   run: |
+    #     docker tag tender-docxtemplate-app:latest ghcr.io/${{ env.REPO }}:v1.${{ github.run_number }}
+    #     docker tag tender-docxtemplate-app:latest ghcr.io/${{ env.REPO }}:latest
+    #     docker push ghcr.io/${{ env.REPO }}:v1.${{ github.run_number }}
+    #     docker push ghcr.io/${{ env.REPO }}:latest
+    - name: Write some variable to a file
       run: |
-        docker tag tender-docxtemplate-app:latest ghcr.io/${{ env.REPO }}:v1.${{ github.run_number }}
-        docker tag tender-docxtemplate-app:latest ghcr.io/${{ env.REPO }}:latest
-        docker push ghcr.io/${{ env.REPO }}:v1.${{ github.run_number }}
-        docker push ghcr.io/${{ env.REPO }}:latest
+        echo "${{ github.workspace }}" > variable.txt
+        echo "$GITHUB_WORKSPACE" >> variable.txt
+
+    # - name: Upload Artiafct to Github
+    #   uses: actions/upload-artifact@v4
+    #   with: 
+    #     name: variable
+    #     path: variable.txt
 
   update_helm_chart:
     runs-on: robot-dind
@@ -71,6 +81,11 @@ jobs:
       packages: write
     needs: build_run_test
     steps:   
+    # - name: Download Artifact from Github
+    #   uses: actions/download-artifact@v4
+    #   with:
+    #     name: variable
+    #     path: your/destination/dir
     - name: Update image version in helm chart
       run: |
         echo "The JOB_No is ${{ github.run_number }}"
