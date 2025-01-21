@@ -12,26 +12,26 @@ jobs:
   build_run_test:
     runs-on: robot-dind
     outputs:
-      RUNNER: ${{ runner.name }}
+      RUNNER: $RUNNER_NAME
     permissions:
       contents: read
       packages: write
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
-    - name: Setup Python 3.13
-      uses: actions/setup-python@v5.3.0
-      with:
-        python-version: "3.13"
-    - name: Cache Docker layers
-      uses: actions/cache@v3
-      with:
-        path: /tmp/.buildx-cache
-        key: ${{ runner.os }}-buildx-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-buildx-
+    # - name: Checkout code
+    #   uses: actions/checkout@v4
+    # - name: Set up Docker Buildx
+    #   uses: docker/setup-buildx-action@v2
+    # - name: Setup Python 3.13
+    #   uses: actions/setup-python@v5.3.0
+    #   with:
+    #     python-version: "3.13"
+    # - name: Cache Docker layers
+    #   uses: actions/cache@v3
+    #   with:
+    #     path: /tmp/.buildx-cache
+    #     key: ${{ runner.os }}-buildx-${{ github.sha }}
+    #     restore-keys: |
+    #       ${{ runner.os }}-buildx-
 
     # - name: Build Docker image
     #   run: docker build --build-arg git_token=${{ secrets.GITHUB_TOKEN }} --build-arg CACHEBUST=$(date +%s) --build-arg BRANCH=main --build-arg OWNER=${{ github.repository_owner }} -t tender-docxtemplate-app .
