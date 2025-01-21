@@ -10,8 +10,7 @@ on:
 
 jobs:
   build_run_test:
-    runs-on: 
-      group: robot-dind
+    runs-on: robot-dind
     permissions:
       contents: read
       packages: write
@@ -66,8 +65,7 @@ jobs:
         docker push ghcr.io/${{ env.REPO }}:latest
 
   update_helm_chart:
-    runs-on: 
-      group: robot-dind
+    runs-on: robot-dind
     permissions:
       contents: read
       packages: write
