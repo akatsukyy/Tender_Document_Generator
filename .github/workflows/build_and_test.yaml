@@ -7,7 +7,11 @@ on:
 
 jobs:
   build_run_test:
-    runs-on: ansible-dind-g2
+    runs-on: 
+      group: ansible-dind-g2
+    permissions:
+      contents: read
+      packages: write
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
