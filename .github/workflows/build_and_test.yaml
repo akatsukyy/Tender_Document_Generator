@@ -11,7 +11,7 @@ on:
 jobs:
   build_run_test:
     runs-on: 
-      group: robot-dind, robot-dind-g2
+      group: robot-dind
     permissions:
       contents: read
       packages: write
@@ -67,7 +67,7 @@ jobs:
 
   update_helm_chart:
     runs-on: 
-      group: robot-dind, robot-dind-g2
+      group: robot-dind
     permissions:
       contents: read
       packages: write
