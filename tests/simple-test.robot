@@ -5,22 +5,14 @@
 # unzip chromedriver-linux64.zip
 # cp app/chromedriver-linux64/chromedriver /usr/local/bin/
 
-# wget --no-verbose -O /tmp/chrome.deb https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_131.0.6778.204-1_amd64.deb
-# sudo apt install -y /tmp/chrome.deb
-# sudo rm /tmp/chrome.deb
-# wget https://chromedriver.storage.googleapis.com/131.0.6778.204/chromedriver_linux64.zip
-# unzip chromedriver_linux64.zip
-# sudo cp chromedriver /usr/local/bin/
-# rm chromedriver_linux64.zip
-
 
 *** Settings ***
 Library  SeleniumLibrary
 Library  Process
 
 *** Variables ***
-${URL}             http://10.98.7.10:8503/docxtemplate
-#${URL}             http://127.0.0.1:8503/docxtemplate
+#${URL}             http://10.98.12.25:8503/docxtemplate
+${URL}             http://127.0.0.1:8503/docxtemplate
 ${BROWSER}         headlesschrome
 
 *** Test Cases ***
