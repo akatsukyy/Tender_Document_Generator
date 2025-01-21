@@ -12,7 +12,7 @@ jobs:
   build_run_test:
     runs-on: robot-dind
     outputs:
-      RUNNER: $RUNNER_NAME
+      RUNNER: ${{ runner.name }}
     permissions:
       contents: read
       packages: write
