@@ -7,117 +7,416 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      commit_id:
+        description: 'Full commit ID to build (default: latest commit). e.g daae94a0f72a13f7092812fa42d684b2af827xxx. WARNING: release job will NOT run by this trigger'
+        type: string
+      wait_seconds:
+        description: 'Wait seconds before cleanup (max 3600)'
+        type: number
+        default: 600
+      
+env:
+  IMAGE_TEST_TAG: ${{ format('test-v{0}', github.run_number) }}
+  IMAGE_NAME: 'tender-docxtemplate-app'
+  CONTAINER_NAME: 'tender-docxtemplate-app'
+  CONTAINER_MAPPING_PORT: '8503:8503'
+  COMMIT_FULL_ID: ${{ inputs.commit_id || github.sha }}
+  WAIT_SECONDS: ${{ inputs.wait_seconds || 600 }}
 
-jobs:
-  build_run_test:
-    runs-on: robot-dind
-    # outputs:
-    #   RUNNER: ${{ runner.name }}
+jobs:  
+  build:
+    runs-on: ubuntu-dind
     permissions:
       contents: read
       packages: write
+      security-events: write
+    outputs:
+      is_latest_or_release_image: ${{ steps.check_existing_image.outputs.is_latest_or_release_image }}
     steps:
+
     - name: Checkout code
       uses: actions/checkout@v4
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
-    - name: Setup Python 3.13
-      uses: actions/setup-python@v5.3.0
       with:
-        python-version: "3.13"
-    - name: Cache Docker layers
-      uses: actions/cache@v3
-      with:
-        path: /tmp/.buildx-cache
-        key: ${{ runner.os }}-buildx-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-buildx-
+        ref: ${{ env.COMMIT_FULL_ID }}
 
-    - name: Build Docker image
-      run: docker build --build-arg git_token=${{ secrets.GITHUB_TOKEN }} --build-arg CACHEBUST=$(date +%s) --build-arg BRANCH=main --build-arg OWNER=${{ github.repository_owner }} -t tender-docxtemplate-app .
-    - name: Run Tender app
+    - name: Downcase REPO and shorten COMMIT ID
       run: |
-        docker run -d --name tender-docxtemplate-app -p 8503:8503 tender-docxtemplate-app
-        sleep 10  # Give the container some time to start
-    - name: Check container status
-      run: docker inspect tender-docxtemplate-app
-      
-    - name: Run Robot Framework tests
-      run: |
-        pip install git+https://github.com/robotframework/SeleniumLibrary.git
-        robot tests/
-    - name: Stop and remove container
-      if: always()
-      run: docker rm -f tender-docxtemplate-app
-    - name: Downcase REPO
-      run: |
+        COMMIT_SHORT_ID=$(git rev-parse --short ${{ env.COMMIT_FULL_ID }})
+        echo "COMMIT_SHORT_ID=${COMMIT_SHORT_ID}" >>${GITHUB_ENV}
         echo "REPO=${GITHUB_REPOSITORY,,}" >>${GITHUB_ENV}
+        echo "COMMIT_SHORT_ID=${{ env.COMMIT_SHORT_ID }}"
+        echo "REPO=${{ env.REPO }}"
+
+    - name: Check existing image in GHCR
+      id: check_existing_image
+      run: |
+        REPO_NAME=$(echo ${{ env.REPO }} | cut -d'/' -f2)
+
+        RESPONSE=$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/users/${{ github.repository_owner }}/packages/container/$REPO_NAME/versions")
+
+        if echo "$RESPONSE" | jq -e 'has("message") and .status == "404"' >/dev/null; then
+          echo "Package '$REPO_NAME' not found"
+          echo "is_image_tag_by_commit_id_existed=false" >> $GITHUB_OUTPUT
+        else
+          IMAGES=$(echo $RESPONSE | jq -r ' .[] | {tags: .metadata.container.tags, updated_at: .updated_at, id: .id} ')
+
+          EXISTED_IMAGE=$(echo $IMAGES | jq -c 'select(.tags | contains(["${{ env.COMMIT_SHORT_ID }}"]))')
+
+          if [[ -z $EXISTED_IMAGE ]]; then
+            echo "Image with tag ${{ env.COMMIT_SHORT_ID }} has not in the ghcr yet."
+            echo "is_image_tag_by_commit_id_existed=false" >> $GITHUB_OUTPUT
+          else
+            FULL_TAGS=$(echo $EXISTED_IMAGE | jq -c '.tags')
+            if [[ $FULL_TAGS == *"latest"* || $FULL_TAGS =~ v[0-9]+\.[0-9]+\.[0-9]+ ]]; then    
+              echo "is_latest_or_release_image=true" >> $GITHUB_OUTPUT
+              echo "is_latest_or_release_image=true"
+            else
+              echo "is_latest_or_release_image=false" >> $GITHUB_OUTPUT
+              echo "is_latest_or_release_image=false"
+            fi
+
+            echo "Image which has tag ${{ env.COMMIT_SHORT_ID }} is existed. The full tags are $FULL_TAGS. Skipping the rest of the build job..."
+            echo "is_image_tag_by_commit_id_existed=true" >> $GITHUB_OUTPUT
+          fi        
+        fi        
+    - name: Get Job ID
+      id: get_job_id
+      run: |
+        curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+        "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+        | jq '.jobs[] | select(.name=="build") | .id' > job_id.txt
+        echo "job_id=$(cat job_id.txt)" >> $GITHUB_OUTPUT
+
+    - name: Determine Commit ID and Comitter Email
+      id: determine_commit_id_and_email_author
+      run: |
+        if [[ ${{ github.event_name }} == 'workflow_dispatch' ]]; then
+          COMMIT_ID=${{ github.event.inputs.commit_id }}
+          COMMIT_AUTHOR_EMAIL=$(git show -s --format='%ae' $COMMIT_ID)
+          COMMIT_AUTHOR_NAME=$(git show -s --format='%aN' $COMMIT_ID)
+        else
+          COMMIT_ID=${{ github.event.head_commit.id }}
+          COMMIT_AUTHOR_EMAIL=${{ github.event.head_commit.author.email }}
+          COMMIT_AUTHOR_NAME=${{ github.event.head_commit.author.name }}
+        fi
+
+        echo "COMMIT_ID=${COMMIT_ID}" >> $GITHUB_OUTPUT
+        echo "COMMIT_AUTHOR_EMAIL=${COMMIT_AUTHOR_EMAIL}" >> $GITHUB_OUTPUT
+        echo "COMMIT_AUTHOR_NAME=${COMMIT_AUTHOR_NAME}" >> $GITHUB_OUTPUT
 
     - name: Login to GitHub Container Registry
+      if: github.event_name == 'push' || github.event_name == 'pull_request' || steps.check_existing_image.outputs.is_image_tag_by_commit_id_existed == 'false'
       uses: docker/login-action@v2
       with:
         registry: ghcr.io
         username: '${{ github.repository_owner }}'
         password: '${{ secrets.GITHUB_TOKEN }}'
-    - name: Push image to GitHub Container Registry
-      run: |
-        docker tag tender-docxtemplate-app:latest ghcr.io/${{ env.REPO }}:v1.${{ github.run_number }}
-        docker tag tender-docxtemplate-app:latest ghcr.io/${{ env.REPO }}:latest
-        docker push ghcr.io/${{ env.REPO }}:v1.${{ github.run_number }}
-        docker push ghcr.io/${{ env.REPO }}:latest
-    - name: Write some variable to a file
-      run: |
-        echo "${{ github.workspace }}" > variable.txt
-        echo "$GITHUB_WORKSPACE" >> variable.txt
-        echo "$RUNNER_NAME" >> variable.txt
-    - name: Upload Artiafct to Github
-      uses: actions/upload-artifact@v4
-      with: 
-        name: variable
-        path: /home/runner/_work/Tender_Document_Generator/Tender_Document_Generator/
 
-
-        
-  update_helm_chart:
-    needs: build_run_test
-    runs-on: robot-dind
-    # runs-on: ${{needs.build_run_test.outputs.RUNNER}}
-    permissions:
-      contents: read
-      packages: write
-    steps:   
-    - name: Download Artifact from Github
-      uses: actions/download-artifact@v4
+    - name: Scan Dockerfile using Trivy and send mail if vulnerabilities detected
+      uses: svtechnmaa/.github/actions/run_trivy_scan_dockerfile@main
       with:
-        name: variable
-        path: /home/runner/_work/Tender_Document_Generator/Tender_Document_Generator/
+        dockerfile_path: './Dockerfile'
+        commit_id: ${{ steps.determine_commit_id_and_email_author.outputs.COMMIT_ID }}
+        mail_username: ${{ vars.MAIL_USERNAME }}
+        mail_password: ${{ secrets.MAIL_PASSWORD }}
+        commit_author_email: ${{ steps.determine_commit_id_and_email_author.outputs.COMMIT_AUTHOR_EMAIL }}
+        commit_author_name: ${{ steps.determine_commit_id_and_email_author.outputs.COMMIT_AUTHOR_NAME }}
+        job_id: ${{ steps.get_job_id.outputs.job_id }}
 
-    - name: Print values in variable.txt
-      run: cat /home/runner/_work/Tender_Document_Generator/Tender_Document_Generator/variable.txt
-
-    - name: Update image version in helm chart
+    - name: Build Docker image
+      if: github.event_name == 'push' || github.event_name == 'pull_request' || steps.check_existing_image.outputs.is_image_tag_by_commit_id_existed == 'false'
       run: |
-        echo "The JOB_No is ${{ runner.name }}"
-        echo "GitHub Actions is not allowed to push commits to the repo, so we can't do it here now."
-        # Nextstep to push
-        # git config --global user.name "svtechnmaa"
-        # git config --global user.email "nmaa@svtech.com.vn"
-        # git clone -b feature/streamlit https://github.com/svtechnmaa/charts.git --depth=1 --single-branch
-        # cd charts/
-        # sed -i '/^  repository: svtechnmaa\/tender_document_generator/{N;s/  tag: .*/  tag: '"v1.${{ github.run_number }}"'/}' kubernetes/docxtemplate/values.yaml
-        # git add .
-        # git commit -m "no-ci: Update docxtemplate image version"
-        # git remote set-url origin https://svtechnmaa:${{ secrets.GITHUB_TOKEN }}@github.com/svtechnmaa/charts.git
-        # git push origin feature/streamlit
-        # sed -i '/^    repository: svtechnmaa\/tender_document_generator/{N;s/  tag: .*/  tag: '"v1.$JOB_No"'/}' kubernetes/internal_apps/docxtemplate/values.yaml
-        # git add .
-        # git commit -S -m "no-ci: Update Docxtemplate image version"
-        # git remote set-url origin https://svtechnmaa:$GIT_TOKEN@github.com/svtechnmaa/stacked_charts.git
-        # git push origin fix/icinga2  ####
-
-        # sed -i '/^  repository: svtechnmaa\/tender_document_generator/{N;s/  tag: .*/  tag: '"v1.$JOB_No"'/}' kubernetes/docxtemplate/values.yaml
-        # git add .
-        # git commit -m "no-ci: Update Docxtemplate image version"
-        # git remote set-url origin https://svtechnmaa:$GIT_TOKEN@github.com/svtechnmaa/charts.git
-        # git push origin $HELMCHART_TAG
+        echo ${{ steps.check_existing_image.outputs.is_image_tag_by_commit_id_existed }}
+        docker build --build-arg git_token=${{ secrets.GITHUB_TOKEN }} --build-arg CACHEBUST=$(date +%s) --build-arg BRANCH=main --build-arg OWNER=${{ github.repository_owner }} -t ${{ env.IMAGE_NAME }} .
+        
+    - name: Scan Docker image using Trivy and send mail if vulnerabilities detected
+      uses: svtechnmaa/.github/actions/run_trivy_scan_image@main
+      with:
+        trivy_server: 'http://10.98.7.14:7777'
+        image_name: ${{env.IMAGE_NAME}}
+        image_tag: 'latest'
+        commit_id: ${{ steps.determine_commit_id_and_email_author.outputs.COMMIT_ID }}
+        mail_username: ${{ vars.MAIL_USERNAME }}
+        mail_password: ${{ secrets.MAIL_PASSWORD }}
+        commit_author_email: ${{ steps.determine_commit_id_and_email_author.outputs.COMMIT_AUTHOR_EMAIL }}
+        commit_author_name: ${{ steps.determine_commit_id_and_email_author.outputs.COMMIT_AUTHOR_NAME }}
+        job_id: ${{ steps.get_job_id.outputs.job_id }}
     
+  #   - id: run_and_check_container_status
+  #     if: github.event_name == 'push' || github.event_name == 'pull_request' || steps.check_existing_image.outputs.is_image_tag_by_commit_id_existed == 'false'
+  #     name: Run Tender app
+  #     uses: svtechnmaa/.github/actions/run_docker_container@main
+  #     with:
+  #       imageName: '${{ env.IMAGE_NAME }}'
+  #       containerName: '${{ env.CONTAINER_NAME }}'
+  #       containerMappingPort: '${{ env.CONTAINER_MAPPING_PORT }}'
+
+  #   - name: Login to GitHub Container Registry
+  #     if: github.event_name == 'push' || github.event_name == 'pull_request' || steps.check_existing_image.outputs.is_image_tag_by_commit_id_existed == 'false'
+  #     uses: docker/login-action@v2
+  #     with:
+  #       registry: ghcr.io
+  #       username: '${{ github.repository_owner }}'
+  #       password: '${{ secrets.GITHUB_TOKEN }}'
+        
+  #   - name: Push image to GitHub Container Registry
+  #     if: github.event_name == 'push' || github.event_name == 'pull_request' || steps.check_existing_image.outputs.is_image_tag_by_commit_id_existed == 'false'
+  #     run: |
+  #       docker tag ${{ env.IMAGE_NAME }}:latest ghcr.io/${{ env.REPO }}:${{ env.IMAGE_TEST_TAG }}
+  #       docker tag ${{ env.IMAGE_NAME }}:latest ghcr.io/${{ env.REPO }}:${{ env.COMMIT_SHORT_ID }}
+  #       docker push ghcr.io/${{ env.REPO }}:${{ env.IMAGE_TEST_TAG }}
+  #       docker push ghcr.io/${{ env.REPO }}:${{ env.COMMIT_SHORT_ID }}
+
+  # test: 
+  #   needs: build
+  #   runs-on: robot-dind
+  #   permissions:
+  #     contents: read
+  #     packages: write
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #       with:
+  #         ref: ${{ env.COMMIT_FULL_ID }}
+
+  #     - name: Downcase REPO and shorten COMMIT ID
+  #       run: |
+  #         COMMIT_SHORT_ID=$(git rev-parse --short ${{ env.COMMIT_FULL_ID }})
+  #         echo "COMMIT_SHORT_ID=${COMMIT_SHORT_ID}" >>${GITHUB_ENV}
+  #         echo "REPO=${GITHUB_REPOSITORY,,}" >>${GITHUB_ENV}
+  #         echo "COMMIT_SHORT_ID=${{ env.COMMIT_SHORT_ID }}"
+  #         echo "REPO=${{ env.REPO }}"
+
+  #     - name: Login to GitHub Container Registry
+  #       uses: docker/login-action@v2
+  #       with:
+  #         registry: ghcr.io
+  #         username: '${{ github.repository_owner }}'
+  #         password: '${{ secrets.GITHUB_TOKEN }}'
+          
+  #     - name: Pull image from GitHub Container Registry
+  #       run: |
+  #         docker pull ghcr.io/${{ env.REPO }}:${{ env.COMMIT_SHORT_ID }}
+
+  #     - id: run_and_check_container_status
+  #       name: Run Tender app
+  #       uses: svtechnmaa/.github/actions/run_docker_container@main
+  #       with:
+  #         imageName: 'ghcr.io/${{ env.REPO }}:${{ env.COMMIT_SHORT_ID }}'
+  #         containerName: '${{ env.CONTAINER_NAME }}'
+  #         containerMappingPort: '${{ env.CONTAINER_MAPPING_PORT }}'
+          
+  #     - name: Run Robot Framework tests
+  #       run: |
+  #         echo "##[command]robot tests/"
+  #         robot tests/
+      
+  #     - name: Wait before cleanup
+  #       if: github.event_name == 'workflow_dispatch' || failure()
+  #       continue-on-error: true
+  #       run: |
+  #         if [ ${{ env.WAIT_SECONDS }} -gt 3600 ]; then
+  #           echo "Wait seconds is too long, set to 3600"
+  #           echo "WAIT_SECONDS=3600" >> $GITHUB_ENV
+  #         fi
+  #         echo "Wait seconds: ${{ env.WAIT_SECONDS }}"
+  #         echo "Waiting before cleanup..."
+  #         sleep ${{ env.WAIT_SECONDS }}
+
+  #     - name: Delete package from GHCR if test fails
+  #       if: github.event_name == 'workflow_dispatch' || failure()
+  #       run: |
+  #         if [[ "${{ needs.build.outputs.is_latest_or_release_image }}" == "true" ]]; then
+  #           echo "Image with tag ${{ env.COMMIT_SHORT_ID }} must NOT be deleted as it is release or latest image."
+  #         else
+  #           echo "Robot test failed, deleting package from GHCR..."
+  #           REPO_NAME=$(echo ${{ env.REPO }} | cut -d'/' -f2)
+  #           echo "Repo name: $REPO_NAME"
+  #           VERSION_ID=$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/users/${{ github.repository_owner }}/packages/container/$REPO_NAME/versions" | jq -r '.[] | select(.metadata.container.tags[] == "${{ env.COMMIT_SHORT_ID }}") | .id')
+  #           echo "Package version ID: $VERSION_ID"
+  #           curl -i -X DELETE -H 'Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' -H "Accept: application/vnd.github.v3+json" "https://api.github.com/users/${{ github.repository_owner }}/packages/container/$REPO_NAME/versions/$VERSION_ID"
+  #         fi
+
+  #     - name: 'Upload Artifact'
+  #       if: always() && !cancelled()
+  #       uses: actions/upload-artifact@v4.6.0
+  #       with:
+  #         name: robot-test-result-#${{ github.run_number }}
+  #         path: |
+  #           ./output.xml
+  #           ./log.html
+  #           ./report.html
+
+
+  # release:
+  #   if: github.event_name == 'push' || github.event_name == 'pull_request'
+  #   needs: test
+  #   runs-on: ubuntu-dind
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+        
+  #     - name: Semantic Release
+  #       uses: cycjimmy/semantic-release-action@v4
+  #       id: semantic
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # If permission denied for protected branch, use ${{ secrets.PUSH_TOKEN }} instead.
+      
+  #     - name: No release published
+  #       if: ${{ steps.semantic.outputs.new_release_published == 'false' }}
+  #       run: |
+  #         echo "No release published, skipping the rest of the job..."
+
+  #     - name: Downcase REPO and shorten COMMIT ID
+  #       if: steps.semantic.outputs.new_release_published == 'true'
+  #       run: |
+  #           COMMIT_SHORT_ID=$(git rev-parse --short ${{ env.COMMIT_FULL_ID }})
+  #           echo "COMMIT_SHORT_ID=${COMMIT_SHORT_ID}" >>${GITHUB_ENV}
+  #           echo "REPO=${GITHUB_REPOSITORY,,}" >>${GITHUB_ENV}
+  #           echo "COMMIT_SHORT_ID=${{ env.COMMIT_SHORT_ID }}"
+  #           echo "REPO=${{ env.REPO }}"
+
+  #     - name: Login to GitHub Container Registry
+  #       if: steps.semantic.outputs.new_release_published == 'true'
+  #       uses: docker/login-action@v2
+  #       with:
+  #         registry: ghcr.io
+  #         username: '${{ github.repository_owner }}'
+  #         password: '${{ secrets.GITHUB_TOKEN }}'
+
+  #     - name: Pull image from GitHub Container Registry
+  #       if: steps.semantic.outputs.new_release_published == 'true'
+  #       run: |
+  #         docker pull ghcr.io/${{ env.REPO }}:${{ env.COMMIT_SHORT_ID }}
+
+  #     - name: Delete package from GHCR after successful release
+  #       if: steps.semantic.outputs.new_release_published == 'true'
+  #       run: |
+  #         if [[ "${{ needs.build.outputs.is_latest_or_release_image }}" == "true" ]]; then
+  #           echo "Image with tag ${{ env.COMMIT_SHORT_ID }} must NOT be deleted as it is release or latest image."
+  #         else
+  #           echo "New release ${{ env.RELEASE_IMAGE_TAG }} was published, deleting image ${{ env.COMMIT_SHORT_ID }} from GHCR..."
+  #           REPO_NAME=$(echo ${{ env.REPO }} | cut -d'/' -f2)
+  #           echo "Repo name: $REPO_NAME"
+  #           VERSION_ID=$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/users/${{ github.repository_owner }}/packages/container/$REPO_NAME/versions" | jq -r '.[] | select(.metadata.container.tags[] == "${{ env.COMMIT_SHORT_ID }}") | .id')
+  #           echo "Package version ID: $VERSION_ID"
+  #           curl -i -X DELETE -H 'Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' -H "Accept: application/vnd.github.v3+json" "https://api.github.com/users/${{ github.repository_owner }}/packages/container/$REPO_NAME/versions/$VERSION_ID"
+  #         fi
+  #       env: 
+  #         RELEASE_IMAGE_TAG: v${{ steps.semantic.outputs.new_release_version }}
+      
+  #     - name: Push latest released image to GitHub Container Registry
+  #       if: steps.semantic.outputs.new_release_published == 'true'
+  #       run: |
+  #         docker push ghcr.io/${{ env.REPO }}:${{ env.COMMIT_SHORT_ID }}  
+
+  #         docker tag ghcr.io/${{ env.REPO }}:${{ env.COMMIT_SHORT_ID }} ghcr.io/${{ env.REPO }}:${{ env.RELEASE_IMAGE_TAG }}
+  #         docker tag ghcr.io/${{ env.REPO }}:${{ env.COMMIT_SHORT_ID }} ghcr.io/${{ env.REPO }}:latest
+
+  #         docker push ghcr.io/${{ env.REPO }}:${{ env.RELEASE_IMAGE_TAG }}
+  #         docker push ghcr.io/${{ env.REPO }}:latest
+  #       env: 
+  #         RELEASE_IMAGE_TAG: v${{ steps.semantic.outputs.new_release_version }}
+
+  #     - name: Checkout charts 
+  #       if: steps.semantic.outputs.new_release_published == 'true'
+  #       uses: actions/checkout@v4
+  #       with:
+  #         repository: '${{ github.repository_owner }}/charts'
+  #         token: ${{ secrets.PUSH_TOKEN }}
+  #         path: charts
+  #         ref: main
+
+  #     - name: Checkout stacked_charts 
+  #       if: steps.semantic.outputs.new_release_published == 'true'
+  #       uses: actions/checkout@v4
+  #       with:
+  #         repository: '${{ github.repository_owner }}/stacked_charts'
+  #         token: ${{ secrets.PUSH_TOKEN }}
+  #         path: stacked_charts
+  #         ref: master
+      
+  #     - name: Checkout SVTECH_CI_utilities 
+  #       if: steps.semantic.outputs.new_release_published == 'true'
+  #       uses: actions/checkout@v4
+  #       with:
+  #         repository: '${{ github.repository_owner }}/SVTECH_CI_utilities'
+  #         token: ${{ secrets.PUSH_TOKEN }}
+  #         path: SVTECH_CI_utilities
+  #         ref: dev-jenkins
+
+  #     - name: Helm tool installer
+  #       if: steps.semantic.outputs.new_release_published == 'true'
+  #       uses: Azure/setup-helm@v3
+      
+  #     - name: Setup Python
+  #       if: steps.semantic.outputs.new_release_published == 'true'
+  #       uses: actions/setup-python@v5.3.0
+  #       with:
+  #         python-version: "3.13"
+
+  #     # - name: Import GPG key
+  #     #   if: steps.semantic.outputs.new_release_published == 'true'
+  #     #   uses: crazy-max/ghaction-import-gpg@v6.2.0
+  #     #   with:
+  #     #     # GPG private key exported as an ASCII armored version or its base64 encoding
+  #     #     gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+            
+  #     - name: Modify image version in charts 
+  #       if: steps.semantic.outputs.new_release_published == 'true'
+  #       run: |
+  #         cd charts
+  #         sed -i '/^  repository: svtechnmaa\/tender_document_generator/{N;s/  tag: .*/  tag: '"${{ env.RELEASE_IMAGE_TAG }}"'/}' kubernetes/docxtemplate/values.yaml
+  #       env:
+  #         RELEASE_IMAGE_TAG: v${{ steps.semantic.outputs.new_release_version }}
+        
+  #     - name: Update image version in stacked_charts 
+  #       if: steps.semantic.outputs.new_release_published == 'true'
+  #       run: |
+  #         pip install requests pyyaml
+  #         python3 ./SVTECH_CI_utilities/auto_testing/python_script/public_helmchart_release.py --BUILD_VARS_PATH="." --ID="." --GITHUB_TOKEN=${{ secrets.PUSH_TOKEN }} --OWNER=svtechnmaa --charts_string=docxtemplate --REPO=charts
+          
+  #         cd stacked_charts
+
+  #         if [[ `git diff --name-only` ]]; then  
+  #           git config user.name "${{ env.GIT_USER_NAME }}"
+  #           git config user.email "${{ env.GIT_USER_EMAIL }}"
+
+  #           git config commit.gpgSign true
+  #           git config user.signingkey ${{ secrets.GPG_KEY_ID }}
+
+  #           git add .
+  #           git commit --no-verify -m "no-ci: Update docxtemplate image version to ${{ env.RELEASE_IMAGE_TAG }}"
+  #           git push origin master
+  #         else
+  #           echo "No changes to commit" 
+  #         fi
+  #       env:
+  #         GIT_USER_NAME: "svtechnmaa"
+  #         GIT_USER_EMAIL: "nmaa@svtech.com.vn"
+  #         RELEASE_IMAGE_TAG: v${{ steps.semantic.outputs.new_release_version }}
+        
+  #     - name: Update image version in charts 
+  #       if: steps.semantic.outputs.new_release_published == 'true'
+  #       run: |
+  #         cd charts 
+  #         helm repo index artifacthub
+
+  #         if [[ `git diff --name-only` ]]; then  
+  #           git config user.name "${{ env.GIT_USER_NAME }}"
+  #           git config user.email "${{ env.GIT_USER_EMAIL }}"
+
+  #           git config commit.gpgSign true
+  #           git config user.signingkey ${{ secrets.GPG_KEY_ID }}
+  #           git add .
+  #           git commit --no-verify -m "no-ci: Update docxtemplate image version to ${{ env.RELEASE_IMAGE_TAG }}"
+  #           git push origin main
+  #         else
+  #           echo "No changes to commit" 
+  #         fi
+  #       env:
+  #         GIT_USER_NAME: "svtechnmaa"
+  #         GIT_USER_EMAIL: "nmaa@svtech.com.vn"
+  #         RELEASE_IMAGE_TAG: v${{ steps.semantic.outputs.new_release_version }}
