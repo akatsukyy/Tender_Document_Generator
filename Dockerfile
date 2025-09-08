@@ -1,5 +1,8 @@
 FROM python:3.10.12-slim
 
+RUN useradd -m kien
+USER kien
+
 LABEL org.opencontainers.image.source=https://github.com/svtechnmaa/Tender_Document_Generator
 
 # Update and install necessary packages
@@ -24,6 +27,7 @@ RUN /usr/bin/git clone --branch $BRANCH https://$git_token@github.com/$OWNER/Ten
 
 # Set the working directory
 WORKDIR /opt/Tender_Document_Generator
+RUN chown -R kien:kien /opt/Tender_Document_Generator
 RUN mkdir /opt/Tender_Document_Generator/templates_set \
  && mkdir /opt/Tender_Document_Generator/templates_inventory
 # Install Python dependencies
