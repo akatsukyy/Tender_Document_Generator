@@ -134,7 +134,7 @@ jobs:
     - name: Scan Docker image using Trivy and send mail if vulnerabilities detected
       uses: svtechnmaa/.github/actions/run_trivy_scan_image@main
       with:
-        trivy_server: 'http://10.98.7.14:7777'
+        trivy_server: '${{ secrets.TRIVY_SERVER }}'
         image_name: ${{env.IMAGE_NAME}}
         image_tag: 'latest'
         commit_id: ${{ steps.determine_commit_id_and_email_author.outputs.COMMIT_ID }}
